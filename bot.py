@@ -431,19 +431,21 @@ async def afterclass_send(callback: types.CallbackQuery, state: FSMContext):
             # Формируем список ссылок
             personal = s.get("payment_link")
             if personal:
-                links_text = personal
+                links_text = f"🔗 {personal}"
             else:
-                links_text = "\n".join(
-                    f"{label}: {lnk}"
-                    for _, (label, lnk) in PAYMENT_OPTIONS.items()
+                links_text = (
+                    f"🔗 [4 занятия]({PAYMENT_LINK_4})\n\n"
+                    f"🔗 [8 занятий]({PAYMENT_LINK_8})\n\n"
+                    f"🔗 [12 занятий]({PAYMENT_LINK_12})"
                 )
             await bot.send_message(
                 int(uid),
-                f"Добрый день, {s['name']}! Пишу вам напомнить, что у вас осталось 1 оплаченное занятие. "
-                f"Ниже вы можете выбрать подходящий абонемент и оплатить. "
-                f"Пожалуйста, внесите оплату до следующего занятия.\n\n"
+                f"Добрый день, {s['name']}!😇\n\n"
+                f"Пишу вам напомнить, что у вас осталось 1 оплаченное занятие.\n\n"
+                f"Ниже вы можете выбрать подходящий абонемент и оплатить. Пожалуйста, внесите оплату до следующего занятия.\n\n"
                 f"{links_text}\n\n"
-                f"После оплаты нажмите на кнопку «Оплачено» 🤓",
+                f"❗После оплаты нажмите на кнопку \"Оплачено\" и выберите количество оплаченных уроков.",
+                parse_mode="Markdown",
                 reply_markup=student_menu()
             )
             if uid in db:
@@ -799,28 +801,34 @@ async def send_reminders():
             try:
                 personal = s.get("payment_link")
                 if personal:
-                    links_text = personal
+                    links_text = f"🔗 {personal}"
                 else:
-                    links_text = "\n".join(
-                        f"{label}: {lnk}"
-                        for _, (label, lnk) in PAYMENT_OPTIONS.items()
+                    links_text = (
+                        f"🔗 [4 занятия]({PAYMENT_LINK_4})\n\n"
+                        f"🔗 [8 занятий]({PAYMENT_LINK_8})\n\n"
+                        f"🔗 [12 занятий]({PAYMENT_LINK_12})"
                     )
                 if dsr == 3:
                     msg = (
-                        f"Добрый день, {s['name']}! Напоминаю про оплату занятий.\n\n"
+                        f"Добрый день, {s['name']}!😇\n\n"
+                        f"Пишу вам напомнить, что у вас осталось 1 оплаченное занятие.\n\n"
+                        f"Ниже вы можете выбрать подходящий абонемент и оплатить. Пожалуйста, внесите оплату до следующего занятия.\n\n"
                         f"{links_text}\n\n"
-                        f"После оплаты нажмите кнопку «Оплачено» 🤓"
+                        f"❗После оплаты нажмите на кнопку \"Оплачено\" и выберите количество оплаченных уроков."
                     )
                 elif dsr == 6:
                     msg = (
-                        f"Добрый день, {s['name']}! Ещё раз напоминаю про оплату.\n\n"
+                        f"Добрый день, {s['name']}!😇\n\n"
+                        f"Пишу вам напомнить, что у вас осталось 1 оплаченное занятие.\n\n"
+                        f"Ниже вы можете выбрать подходящий абонемент и оплатить. Пожалуйста, внесите оплату до следующего занятия.\n\n"
                         f"{links_text}\n\n"
+                        f"❗После оплаты нажмите на кнопку \"Оплачено\" и выберите количество оплаченных уроков.\n\n"
                         f"Если есть вопросы — напишите Марии напрямую 🤓"
                     )
                 else:
                     continue
 
-                await bot.send_message(int(uid), msg, reply_markup=student_menu())
+                await bot.send_message(int(uid), msg, parse_mode="Markdown", reply_markup=student_menu())
                 await asyncio.sleep(0.1)
 
                 # Уведомляем преподавателя на 6й день
