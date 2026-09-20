@@ -35,6 +35,47 @@ GROUPS = {
 
 REMINDER_DAYS = [3, 6]
 
+# День недели для каждой группы (0=пн, 1=вт, 2=ср, 3=чт)
+GROUP_WEEKDAY = {
+    "mon_1030": 0,
+    "tue_1100": 1,
+    "tue_1800": 1,
+    "wed_1300": 2,
+    "wed_1730": 2,
+    "thu_1030": 3,
+}
+
+
+def lessons_passed(payment_date_str, group_key):
+    """Сколько занятий прошло после даты оплаты (не включая день оплаты)"""
+    try:
+        from datetime import date as _date
+        pay_date = _date.fromisoformat(payment_date_str)
+        weekday = GROUP_WEEKDAY.get(group_key, 0)
+        count = 0
+        d = pay_date + timedelta(days=1)
+        while d <= _date.today():
+            if d.weekday() == weekday:
+                count += 1
+            d += timedelta(days=1)
+        return count
+    except:
+        return 0
+
+
+def lessons_left(student):
+    """Остаток: купленные + 1 текущий - прошедшие после оплаты"""
+    last_plan = student.get("last_plan", "")
+    try:
+        bought = int(last_plan.split()[0])
+    except:
+        return None
+    passed = lessons_passed(
+        student.get("payment_date", ""),
+        student.get("group", "")
+    )
+    return max(bought + 1 - passed, 0)
+
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -120,13 +161,12 @@ def reminder_text(name, student):
         f"Ниже вы можете выбрать подходящий абонемент и оплатить. "
         f"Пожалуйста, внесите оплату до следующего занятия.\n\n"
         f"{links}\n\n"
-        f"❗После оплаты нажмите на кнопку \"Оплачено\" и выберите количество оплаченных уроков."
+        f"❗Подтвердите оплату по кнопке ниже."
     )
 
 
 # --- Меню ---
 def student_menu():
-    """Обычное меню без кнопки оплаты"""
     b = InlineKeyboardBuilder()
     b.button(text="Статус занятий", callback_data="my_info")
     b.button(text="Написать Марии", url="https://t.me/maria_polukhina")
@@ -134,7 +174,6 @@ def student_menu():
     return b.as_markup()
 
 def payment_menu():
-    """Меню с кнопками подтверждения оплаты — приходит вместе с напоминанием"""
     b = InlineKeyboardBuilder()
     b.button(text="Я оплатил(а) 4 урока", callback_data="plan_4")
     b.button(text="Я оплатил(а) 8 уроков", callback_data="plan_8")
@@ -150,6 +189,7 @@ def admin_menu():
     b.button(text="📢 Рассылка всем", callback_data="admin_broadcast")
     b.button(text="✏️ После занятия", callback_data="after_class")
     b.button(text="🔗 Изменить ссылку ученика", callback_data="admin_set_link")
+    b.button(text="✏️ Исправить оплату", callback_data="admin_fix_plan")
     b.button(text="⏸ Пауза / удаление", callback_data="admin_manage")
     b.button(text="♻️ Реактивировать ученика", callback_data="admin_reactivate")
     b.adjust(1)
@@ -177,8 +217,13 @@ async def cmd_start(message: types.Message, state: FSMContext):
     if student and student.get("active") and not student.get("paused"):
         dsr = days_since_reminder(student)
         paid = is_paid_after_reminder(student)
+        last_plan = student.get("last_plan", "")
+        left = lessons_left(student) if last_plan else None
         if paid or dsr is None:
-            status = "Оплата актуальна 🤓"
+            if left is not None:
+                status = f"Осталось уроков: *{left}* 🤓"
+            else:
+                status = "Оплата актуальна 🤓"
         elif dsr <= 3:
             status = f"Ожидаем оплату ({dsr} дн.) 🤓"
         else:
@@ -187,6 +232,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
             f"Добрый день, {student['name']}!\n\n"
             f"Группа: {GROUPS.get(student['group'], '?')}\n"
             f"Статус: {status}",
+            parse_mode="Markdown",
             reply_markup=student_menu()
         )
     elif student and student.get("paused"):
@@ -245,10 +291,7 @@ async def reg_group(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-
-
-
-# --- Ученик: выбрал план — фиксируем оплату, одно сообщение ---
+# --- Ученик: выбрал план ---
 @dp.callback_query(F.data.startswith("plan_"))
 async def select_plan(callback: types.CallbackQuery):
     plan_key = callback.data.replace("plan_", "")
@@ -288,17 +331,27 @@ async def my_info(callback: types.CallbackQuery):
         return
     dsr = days_since_reminder(student)
     paid = is_paid_after_reminder(student)
+    last_plan = student.get("last_plan", "")
+    left = lessons_left(student) if last_plan else None
+
     if paid or dsr is None:
-        status = "Оплата актуальна 🤓"
+        if left is not None:
+            status = f"Осталось уроков: *{left}* 🤓"
+        else:
+            status = "Оплата актуальна 🤓"
     elif dsr <= 3:
         status = f"Ожидаем оплату ({dsr} дн.) 🤓"
     else:
         status = f"Просрочка {dsr} дн. 🤓"
+
+    plan_line = f"Абонемент: {last_plan}\n" if last_plan else ""
     await callback.message.answer(
         f"Ваш статус:\n\n"
         f"{student['name']}\n"
         f"{GROUPS.get(student['group'], '?')}\n"
-        f"Статус: {status}",
+        f"{plan_line}"
+        f"{status}",
+        parse_mode="Markdown",
         reply_markup=student_menu()
     )
     await callback.answer()
@@ -422,6 +475,74 @@ async def afterclass_send(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+# --- АДМИН: исправить оплату ученика ---
+@dp.callback_query(F.data == "admin_fix_plan")
+async def admin_fix_plan(callback: types.CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    db = load_db()
+    b = InlineKeyboardBuilder()
+    for uid, s in db.items():
+        if s.get("active") and is_paid_after_reminder(s):
+            plan = s.get("last_plan", "?")
+            b.button(text=f"{s['name']} ({plan})", callback_data=f"fixplan_{uid}")
+    if not b._markup:
+        await callback.message.answer("Нет учеников с недавней оплатой.", reply_markup=admin_menu())
+        await callback.answer()
+        return
+    b.adjust(1)
+    await callback.message.answer(
+        "Выбери ученика для исправления оплаты:",
+        reply_markup=b.as_markup()
+    )
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("fixplan_"))
+async def fixplan_pick(callback: types.CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    uid = callback.data.replace("fixplan_", "")
+    db = load_db()
+    s = db.get(uid)
+    current = s.get("last_plan", "?")
+    b = InlineKeyboardBuilder()
+    for key, (label, _) in PAYMENT_OPTIONS.items():
+        b.button(text=label, callback_data=f"fixplan_set_{uid}|{key}")
+    b.adjust(1)
+    await callback.message.answer(
+        f"{s['name']}\nТекущая оплата: {current}\n\nВыбери правильный вариант:",
+        reply_markup=b.as_markup()
+    )
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("fixplan_set_"))
+async def fixplan_set(callback: types.CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    parts = callback.data.replace("fixplan_set_", "").split("|", 1)
+    uid, plan_key = parts[0], parts[1]
+    label, _ = PAYMENT_OPTIONS.get(plan_key, ("?", ""))
+    db = load_db()
+    if uid in db:
+        old_plan = db[uid].get("last_plan", "?")
+        db[uid]["last_plan"] = label
+        save_db(db)
+        name = db[uid]["name"]
+        await callback.message.answer(
+            f"Исправлено!\n{name}: {old_plan} → {label}",
+            reply_markup=admin_menu()
+        )
+        try:
+            await bot.send_message(
+                int(uid),
+                f"Мария исправила вашу оплату: {label} 🌸",
+                reply_markup=student_menu()
+            )
+        except Exception as e:
+            logging.error(f"Не удалось уведомить ученика {uid}: {e}")
+    await callback.answer()
+
+
 # --- АДМИН: список учеников ---
 @dp.callback_query(F.data == "admin_list")
 async def admin_list(callback: types.CallbackQuery):
@@ -453,7 +574,8 @@ async def admin_list(callback: types.CallbackQuery):
                 status = f"{dsr}д!!"
             paused = " (пауза)" if s.get("paused") else ""
             custom = " (своя ссылка)" if s.get("payment_link") else ""
-            text += f"• {s['name']} — {status}{paused}{custom}\n"
+            plan = f" [{s['last_plan']}]" if s.get("last_plan") and paid else ""
+            text += f"• {s['name']} — {status}{plan}{paused}{custom}\n"
 
     await callback.message.answer(text or "Нет учеников.", parse_mode="Markdown", reply_markup=admin_menu())
     await callback.answer()
@@ -734,7 +856,7 @@ async def cmd_admin(message: types.Message):
     await message.answer("Панель управления:", reply_markup=admin_menu())
 
 
-# --- Авто-напоминания (день +3 и +6) ---
+# --- Авто-напоминания ---
 async def send_reminders():
     while True:
         now = datetime.now()
