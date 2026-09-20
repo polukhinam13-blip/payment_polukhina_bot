@@ -33,7 +33,6 @@ GROUPS = {
     "thu_1030": "Четверг 10:30 мск",
 }
 
-# Дни авто-напоминаний после ручной отправки
 REMINDER_DAYS = [3, 6]
 
 logging.basicConfig(level=logging.INFO)
@@ -76,7 +75,6 @@ class SetLink(StatesGroup):
 class SelectPlan(StatesGroup):
     waiting_plan = State()
 
-
 class AfterClass(StatesGroup):
     selecting_students = State()
 
@@ -86,7 +84,6 @@ def is_admin(user_id):
     return user_id == ADMIN_ID
 
 def get_payment_link(student):
-    """Персональная ссылка или стандартная для выбранного абонемента"""
     return student.get("payment_link") or None
 
 def days_since_reminder(student):
@@ -117,7 +114,8 @@ def student_menu():
     b = InlineKeyboardBuilder()
     b.button(text="Оплачено", callback_data="paid")
     b.button(text="Статус занятий", callback_data="my_info")
-    b.button(text="Написать Марии", callback_data="contact_teacher")
+    # Кнопка с прямой ссылкой на чат с Марией
+    b.button(text="Написать Марии", url="https://t.me/maria_polukhina")
     b.adjust(1)
     return b.as_markup()
 
@@ -231,7 +229,6 @@ async def paid_callback(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer()
         return
 
-    # Если есть персональная ссылка — сразу фиксируем
     personal_link = student.get("payment_link")
     if personal_link:
         student["payment_date"] = str(date.today())
@@ -250,7 +247,6 @@ async def paid_callback(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer()
         return
 
-    # Иначе показываем выбор абонемента
     b = InlineKeyboardBuilder()
     for key, (label, link) in PAYMENT_OPTIONS.items():
         b.button(text=label, callback_data=f"plan_{key}")
@@ -283,7 +279,7 @@ async def select_plan(callback: types.CallbackQuery, state: FSMContext):
         f"{date.today().strftime('%d.%m.%Y')}"
     )
     await callback.message.answer(
-        f"Спасибо, {student['name']}! Отмечу вашу оплату ({label})🌸 ",
+        f"Спасибо, {student['name']}! Отмечу вашу оплату ({label}) 🌸",
         reply_markup=student_menu()
     )
     await callback.answer()
@@ -311,23 +307,6 @@ async def my_info(callback: types.CallbackQuery):
         f"{GROUPS.get(student['group'], '?')}\n"
         f"Статус: {status}",
         reply_markup=student_menu()
-    )
-    await callback.answer()
-
-
-# --- Ученик: написать Марии ---
-@dp.callback_query(F.data == "contact_teacher")
-async def contact_teacher(callback: types.CallbackQuery):
-    student = get_student(callback.from_user.id)
-    name = student["name"] if student else callback.from_user.full_name
-    await bot.send_message(
-        ADMIN_ID,
-        f"{name} хочет связаться!\n"
-        f"Telegram: @{callback.from_user.username or '—'}\n"
-        f"ID: {callback.from_user.id}"
-    )
-    await callback.message.answer(
-        "Напишите Марии напрямую 🤓"
     )
     await callback.answer()
 
@@ -426,9 +405,7 @@ async def afterclass_send(callback: types.CallbackQuery, state: FSMContext):
     for uid, s in students:
         if uid not in targets:
             continue
-        link = get_payment_link(s)
         try:
-            # Формируем список ссылок
             personal = s.get("payment_link")
             if personal:
                 links_text = f"🔗 {personal}"
@@ -831,7 +808,6 @@ async def send_reminders():
                 await bot.send_message(int(uid), msg, parse_mode="Markdown", reply_markup=student_menu())
                 await asyncio.sleep(0.1)
 
-                # Уведомляем преподавателя на 6й день
                 if dsr == 6:
                     await bot.send_message(
                         ADMIN_ID,
