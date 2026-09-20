@@ -174,7 +174,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
     elif student and not student.get("active"):
         await message.answer(
             "Рады видеть вас снова!\n\n"
-            "Ваш аккаунт неактивен. Напишите Марии для возобновления занятий 🤓"
+            "Ваш аккаунт неактивен. Напишите Марии для возобновления занятий 🙏"
         )
     else:
         await message.answer(
@@ -216,7 +216,7 @@ async def reg_group(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.answer(
         f"Вы зарегистрированы, {data['name']}!\n\n"
         f"Группа: {GROUPS[group_key]}\n\n"
-        f"Мария свяжется с вами для подтверждения 🤓",
+        f"Мария свяжется с вами для подтверждения!",
         reply_markup=student_menu()
     )
     await callback.answer()
@@ -244,7 +244,7 @@ async def paid_callback(callback: types.CallbackQuery, state: FSMContext):
             f"{date.today().strftime('%d.%m.%Y')}"
         )
         await callback.message.answer(
-            f"🌸 Спасибо, {student['name']}! Отмечу вашу оплату.",
+            f"Спасибо, {student['name']}! Отмечу вашу оплату 🌸",
             reply_markup=student_menu()
         )
         await callback.answer()
@@ -283,7 +283,7 @@ async def select_plan(callback: types.CallbackQuery, state: FSMContext):
         f"{date.today().strftime('%d.%m.%Y')}"
     )
     await callback.message.answer(
-        f"🌸 Спасибо, {student['name']}! Отмечу вашу оплату ({label}).",
+        f"Спасибо, {student['name']}! Отмечу вашу оплату ({label})🌸 ",
         reply_markup=student_menu()
     )
     await callback.answer()
