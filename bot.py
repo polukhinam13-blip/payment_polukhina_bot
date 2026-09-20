@@ -19,9 +19,9 @@ PAYMENT_LINK_8 = os.getenv("PAYMENT_LINK_8", "https://pay.example.com/8")
 PAYMENT_LINK_12 = os.getenv("PAYMENT_LINK_12", "https://pay.example.com/12")
 
 PAYMENT_OPTIONS = {
-    "4":  ("4 занятия",  PAYMENT_LINK_4),
-    "8":  ("8 занятий",  PAYMENT_LINK_8),
-    "12": ("12 занятий", PAYMENT_LINK_12),
+    "4":  ("4 урока",   PAYMENT_LINK_4),
+    "8":  ("8 уроков",  PAYMENT_LINK_8),
+    "12": ("12 уроков", PAYMENT_LINK_12),
 }
 
 GROUPS = {
@@ -72,9 +72,6 @@ class Broadcast(StatesGroup):
 class SetLink(StatesGroup):
     waiting_link = State()
 
-class SelectPlan(StatesGroup):
-    waiting_plan = State()
-
 class AfterClass(StatesGroup):
     selecting_students = State()
 
@@ -82,9 +79,6 @@ class AfterClass(StatesGroup):
 # --- Утилиты ---
 def is_admin(user_id):
     return user_id == ADMIN_ID
-
-def get_payment_link(student):
-    return student.get("payment_link") or None
 
 def days_since_reminder(student):
     reminded_at = student.get("reminded_at")
@@ -108,13 +102,44 @@ def is_paid_after_reminder(student):
     except:
         return False
 
+def get_links_text(student):
+    personal = student.get("payment_link")
+    if personal:
+        return f"🔗 {personal}"
+    return (
+        f"🔗 [4 занятия]({PAYMENT_LINK_4})\n\n"
+        f"🔗 [8 занятий]({PAYMENT_LINK_8})\n\n"
+        f"🔗 [12 занятий]({PAYMENT_LINK_12})"
+    )
+
+def reminder_text(name, student):
+    links = get_links_text(student)
+    return (
+        f"Добрый день, {name}!😇\n\n"
+        f"Пишу вам напомнить, что у вас осталось 1 оплаченное занятие.\n\n"
+        f"Ниже вы можете выбрать подходящий абонемент и оплатить. "
+        f"Пожалуйста, внесите оплату до следующего занятия.\n\n"
+        f"{links}\n\n"
+        f"❗После оплаты нажмите на кнопку \"Оплачено\" и выберите количество оплаченных уроков."
+    )
+
 
 # --- Меню ---
 def student_menu():
+    """Обычное меню без кнопки оплаты"""
     b = InlineKeyboardBuilder()
-    b.button(text="Оплачено", callback_data="paid")
     b.button(text="Статус занятий", callback_data="my_info")
-    # Кнопка с прямой ссылкой на чат с Марией
+    b.button(text="Написать Марии", url="https://t.me/maria_polukhina")
+    b.adjust(1)
+    return b.as_markup()
+
+def payment_menu():
+    """Меню с кнопками подтверждения оплаты — приходит вместе с напоминанием"""
+    b = InlineKeyboardBuilder()
+    b.button(text="Я оплатил(а) 4 урока", callback_data="plan_4")
+    b.button(text="Я оплатил(а) 8 уроков", callback_data="plan_8")
+    b.button(text="Я оплатил(а) 12 уроков", callback_data="plan_12")
+    b.button(text="Статус занятий", callback_data="my_info")
     b.button(text="Написать Марии", url="https://t.me/maria_polukhina")
     b.adjust(1)
     return b.as_markup()
@@ -220,57 +245,25 @@ async def reg_group(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-# --- Ученик: оплата — выбор абонемента ---
-@dp.callback_query(F.data == "paid")
-async def paid_callback(callback: types.CallbackQuery, state: FSMContext):
-    student = get_student(callback.from_user.id)
-    if not student:
-        await callback.message.answer("Вы не зарегистрированы. Напишите /start")
-        await callback.answer()
-        return
 
-    personal_link = student.get("payment_link")
-    if personal_link:
-        student["payment_date"] = str(date.today())
-        student["reminded_at"] = None
-        save_student(callback.from_user.id, student)
-        await bot.send_message(
-            ADMIN_ID,
-            f"Оплата!\n"
-            f"{student['name']} ({GROUPS.get(student['group'], '?')})\n"
-            f"{date.today().strftime('%d.%m.%Y')}"
-        )
-        await callback.message.answer(
-            f"Спасибо, {student['name']}! Отмечу вашу оплату 🌸",
-            reply_markup=student_menu()
-        )
-        await callback.answer()
-        return
 
-    b = InlineKeyboardBuilder()
-    for key, (label, link) in PAYMENT_OPTIONS.items():
-        b.button(text=label, callback_data=f"plan_{key}")
-    b.adjust(1)
-    await callback.message.answer(
-        "Выберите абонемент:",
-        reply_markup=b.as_markup()
-    )
-    await state.set_state(SelectPlan.waiting_plan)
-    await callback.answer()
 
-@dp.callback_query(SelectPlan.waiting_plan, F.data.startswith("plan_"))
-async def select_plan(callback: types.CallbackQuery, state: FSMContext):
+# --- Ученик: выбрал план — фиксируем оплату, одно сообщение ---
+@dp.callback_query(F.data.startswith("plan_"))
+async def select_plan(callback: types.CallbackQuery):
     plan_key = callback.data.replace("plan_", "")
-    label, link = PAYMENT_OPTIONS.get(plan_key, ("?", ""))
     student = get_student(callback.from_user.id)
     if not student:
         await callback.answer()
         return
+
+    label, _ = PAYMENT_OPTIONS.get(plan_key, ("?", ""))
+
     student["payment_date"] = str(date.today())
     student["reminded_at"] = None
     student["last_plan"] = label
     save_student(callback.from_user.id, student)
-    await state.clear()
+
     await bot.send_message(
         ADMIN_ID,
         f"Оплата!\n"
@@ -279,7 +272,7 @@ async def select_plan(callback: types.CallbackQuery, state: FSMContext):
         f"{date.today().strftime('%d.%m.%Y')}"
     )
     await callback.message.answer(
-        f"Спасибо, {student['name']}! Отмечу вашу оплату ({label}) 🌸",
+        f"🌸 Спасибо, {student['name']}! Отмечу вашу оплату ({label}).",
         reply_markup=student_menu()
     )
     await callback.answer()
@@ -406,24 +399,11 @@ async def afterclass_send(callback: types.CallbackQuery, state: FSMContext):
         if uid not in targets:
             continue
         try:
-            personal = s.get("payment_link")
-            if personal:
-                links_text = f"🔗 {personal}"
-            else:
-                links_text = (
-                    f"🔗 [4 занятия]({PAYMENT_LINK_4})\n\n"
-                    f"🔗 [8 занятий]({PAYMENT_LINK_8})\n\n"
-                    f"🔗 [12 занятий]({PAYMENT_LINK_12})"
-                )
             await bot.send_message(
                 int(uid),
-                f"Добрый день, {s['name']}!😇\n\n"
-                f"Пишу вам напомнить, что у вас осталось 1 оплаченное занятие.\n\n"
-                f"Ниже вы можете выбрать подходящий абонемент и оплатить. Пожалуйста, внесите оплату до следующего занятия.\n\n"
-                f"{links_text}\n\n"
-                f"❗После оплаты нажмите на кнопку \"Оплачено\" и выберите количество оплаченных уроков.",
+                reminder_text(s['name'], s),
                 parse_mode="Markdown",
-                reply_markup=student_menu()
+                reply_markup=payment_menu()
             )
             if uid in db:
                 db[uid]["reminded_at"] = today_str
@@ -734,10 +714,7 @@ async def do_reactivate(callback: types.CallbackQuery):
         db[uid]["reminded_at"] = None
         save_db(db)
         name = db[uid]["name"]
-        await callback.message.answer(
-            f"{name} реактивирован(а)!",
-            reply_markup=admin_menu()
-        )
+        await callback.message.answer(f"{name} реактивирован(а)!", reply_markup=admin_menu())
         try:
             await bot.send_message(
                 int(uid),
@@ -776,36 +753,17 @@ async def send_reminders():
             if dsr is None or dsr not in REMINDER_DAYS:
                 continue
             try:
-                personal = s.get("payment_link")
-                if personal:
-                    links_text = f"🔗 {personal}"
-                else:
-                    links_text = (
-                        f"🔗 [4 занятия]({PAYMENT_LINK_4})\n\n"
-                        f"🔗 [8 занятий]({PAYMENT_LINK_8})\n\n"
-                        f"🔗 [12 занятий]({PAYMENT_LINK_12})"
-                    )
                 if dsr == 3:
-                    msg = (
-                        f"Добрый день, {s['name']}!😇\n\n"
-                        f"Пишу вам напомнить, что у вас осталось 1 оплаченное занятие.\n\n"
-                        f"Ниже вы можете выбрать подходящий абонемент и оплатить. Пожалуйста, внесите оплату до следующего занятия.\n\n"
-                        f"{links_text}\n\n"
-                        f"❗После оплаты нажмите на кнопку \"Оплачено\" и выберите количество оплаченных уроков."
-                    )
+                    msg = reminder_text(s['name'], s)
                 elif dsr == 6:
                     msg = (
-                        f"Добрый день, {s['name']}!😇\n\n"
-                        f"Пишу вам напомнить, что у вас осталось 1 оплаченное занятие.\n\n"
-                        f"Ниже вы можете выбрать подходящий абонемент и оплатить. Пожалуйста, внесите оплату до следующего занятия.\n\n"
-                        f"{links_text}\n\n"
-                        f"❗После оплаты нажмите на кнопку \"Оплачено\" и выберите количество оплаченных уроков.\n\n"
-                        f"Если есть вопросы — напишите Марии напрямую 🤓"
+                        reminder_text(s['name'], s) +
+                        "\n\nЕсли есть вопросы — напишите Марии напрямую 🤓"
                     )
                 else:
                     continue
 
-                await bot.send_message(int(uid), msg, parse_mode="Markdown", reply_markup=student_menu())
+                await bot.send_message(int(uid), msg, parse_mode="Markdown", reply_markup=payment_menu())
                 await asyncio.sleep(0.1)
 
                 if dsr == 6:
